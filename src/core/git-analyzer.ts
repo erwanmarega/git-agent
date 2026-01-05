@@ -21,4 +21,8 @@ export class GitAnalyzer {
   async getStatus(): Promise<StatusResult> {
     return this.git.status();
   }
+
+  async createCommit(message: string): Promise<void> {
+    await this.git.commit(message);
+  }
 }

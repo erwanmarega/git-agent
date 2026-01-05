@@ -18,19 +18,34 @@ async function handleCommitFlow(
   console.log(chalk.white(commitMessage));
   console.log();
 
-  const { action } = await inquirer.prompt([
+  console.log(chalk.cyan("\nOptions:"));
+  console.log("  1) Accept and commit");
+  console.log("  2) Edit message");
+  console.log("  3) Regenerate");
+  console.log("  4) Cancel");
+
+  const { choice } = await inquirer.prompt([
     {
-      type: "list",
-      name: "action",
-      message: "What do you want to do?",
-      choices: [
-        { name: "✓ Accept and commit", value: "accept" },
-        { name: "✎ Edit message", value: "edit" },
-        { name: "↻ Regenerate", value: "regenerate" },
-        { name: "✗ Cancel", value: "cancel" },
-      ],
+      type: "input",
+      name: "choice",
+      message: "Your choice (1-4):",
+      validate: (input: string) => {
+        if (!["1", "2", "3", "4"].includes(input.trim())) {
+          return "Please enter 1, 2, 3, or 4";
+        }
+        return true;
+      },
     },
   ]);
+
+  const actionMap: { [key: string]: string } = {
+    "1": "accept",
+    "2": "edit",
+    "3": "regenerate",
+    "4": "cancel",
+  };
+
+  const action = actionMap[choice.trim()];
 
   if (action === "accept") {
     const spinner = ora("Creating commit...").start();
@@ -72,13 +87,45 @@ export async function commitCommand() {
   const spinner = ora("Analyzing your changes...").start();
 
   try {
-    const changes = await gitAnalyzer.getStagedChanges();
+    // Check for unstaged changes
+    const status = await gitAnalyzer.getStatus();
+    const hasUnstagedChanges = status.modified.length > 0 || status.not_added.length > 0;
+
+    let changes = await gitAnalyzer.getStagedChanges();
+
+    // If no staged changes but there are unstaged changes, ask to stage them
+    if (!changes.hasChanges && hasUnstagedChanges) {
+      spinner.stop();
+
+      console.log(chalk.yellow("\nNo staged changes found, but you have modified files:"));
+      [...status.modified, ...status.not_added].slice(0, 10).forEach((file) => {
+        console.log(chalk.gray(`  - ${file}`));
+      });
+
+      const { stageAll } = await inquirer.prompt([
+        {
+          type: "confirm",
+          name: "stageAll",
+          message: "Do you want to stage all changes? (git add .)",
+          default: true,
+        },
+      ]);
+
+      if (stageAll) {
+        const stageSpinner = ora("Staging all changes...").start();
+        await gitAnalyzer.stageAll();
+        stageSpinner.succeed("All changes staged");
+        changes = await gitAnalyzer.getStagedChanges();
+      } else {
+        console.log(chalk.yellow('\nPlease stage your changes with "git add" and try again.'));
+        return;
+      }
+
+      spinner.start("Analyzing your changes...");
+    }
 
     if (!changes.hasChanges) {
-      spinner.fail("No staged changes found.");
-      console.log(
-        chalk.yellow('\nTip: Use "git add" to stage your changes first.')
-      );
+      spinner.fail("No changes to commit.");
       return;
     }
 

@@ -25,4 +25,8 @@ export class GitAnalyzer {
   async createCommit(message: string): Promise<void> {
     await this.git.commit(message);
   }
+
+  async stageAll(): Promise<void> {
+    await this.git.add(".");
+  }
 }

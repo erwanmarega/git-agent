@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { Command } from "commander";
 import { commitCommand } from "./cli/commit";
 import { initCommand } from "./cli/init";

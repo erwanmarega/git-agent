@@ -4,6 +4,7 @@ import ora from "ora";
 import { GitAnalyzer } from "../core/git-analyzer";
 import { AIService } from "../core/ai-service";
 import { ChangeAnalyzer } from "../core/change-analyzer";
+import { SuggestionsEngine } from "../core/suggestions";
 
 async function handleCommitFlow(
   gitAnalyzer: GitAnalyzer,
@@ -82,26 +83,29 @@ async function handleCommitFlow(
 async function handleMultipleCommits(
   gitAnalyzer: GitAnalyzer,
   aiService: AIService,
-  groups: Array<{ label: string; scope: string; files: string[]; category: string }>
+  groups: Array<{
+    label: string;
+    scope: string;
+    files: string[];
+    category: string;
+  }>
 ): Promise<void> {
-  console.log(chalk.green(`\n Creating ${groups.length} separate commits...\n`));
+  console.log(
+    chalk.green(`\n Creating ${groups.length} separate commits...\n`)
+  );
 
   for (let i = 0; i < groups.length; i++) {
     const group = groups[i];
     console.log(chalk.blue(`\n[${i + 1}/${groups.length}] ${group.label}`));
 
-    // Unstage tout
     await gitAnalyzer.unstageAll();
 
-    // Stage uniquement les fichiers de ce groupe
     for (const file of group.files) {
       await gitAnalyzer.stageFile(file);
     }
 
-    // Récupérer le diff de ce groupe
     const groupChanges = await gitAnalyzer.getStagedChanges();
 
-    // Demander du contexte optionnel
     const { hasContext } = await inquirer.prompt([
       {
         type: "confirm",
@@ -124,11 +128,12 @@ async function handleMultipleCommits(
       context = answer.context;
     }
 
-    // Générer et créer le commit
     await handleCommitFlow(gitAnalyzer, aiService, groupChanges.diff, context);
   }
 
-  console.log(chalk.green(`\n All ${groups.length} commits created successfully! \n`));
+  console.log(
+    chalk.green(`\n All ${groups.length} commits created successfully! \n`)
+  );
 }
 
 export async function commitCommand() {
@@ -141,14 +146,17 @@ export async function commitCommand() {
 
   try {
     const status = await gitAnalyzer.getStatus();
-    const hasUnstagedChanges = status.modified.length > 0 || status.not_added.length > 0;
+    const hasUnstagedChanges =
+      status.modified.length > 0 || status.not_added.length > 0;
 
     let changes = await gitAnalyzer.getStagedChanges();
 
     if (!changes.hasChanges && hasUnstagedChanges) {
       spinner.stop();
 
-      console.log(chalk.yellow("\nNo staged changes found, but you have modified files:"));
+      console.log(
+        chalk.yellow("\nNo staged changes found, but you have modified files:")
+      );
       [...status.modified, ...status.not_added].slice(0, 10).forEach((file) => {
         console.log(chalk.gray(`  - ${file}`));
       });
@@ -168,7 +176,11 @@ export async function commitCommand() {
         stageSpinner.succeed("All changes staged");
         changes = await gitAnalyzer.getStagedChanges();
       } else {
-        console.log(chalk.yellow('\nPlease stage your changes with "git add" and try again.'));
+        console.log(
+          chalk.yellow(
+            '\nPlease stage your changes with "git add" and try again.'
+          )
+        );
         return;
       }
 
@@ -187,35 +199,118 @@ export async function commitCommand() {
       console.log(chalk.gray(`  - ${file}`));
     });
 
-    // Analyse intelligente des changements
     const changeAnalyzer = new ChangeAnalyzer();
     const analysis = changeAnalyzer.analyzeFiles(changes.files);
 
-    // Afficher les suggestions si présentes
+    const suggestionsEngine = new SuggestionsEngine();
+    const securityAnalysis = suggestionsEngine.analyze(changes.files, changes.diff);
+
+    if (securityAnalysis.hasHighSeverity) {
+      console.log(chalk.red.bold("\n SECURITY ALERT!\n"));
+
+      securityAnalysis.secrets.forEach((secret) => {
+        if (secret.severity === "high") {
+          console.log(chalk.red(`  ${secret.message}`));
+          console.log(chalk.gray(`     File: ${secret.file}`));
+          console.log(chalk.yellow(`     ${secret.suggestion}\n`));
+        }
+      });
+
+      console.log(chalk.red("These files contain sensitive information that should NOT be committed!\n"));
+
+      console.log("Options:");
+      console.log("  1) Remove sensitive files from commit (recommended)");
+      console.log("  2) Continue anyway (NOT recommended)");
+      console.log("  3) Cancel");
+
+      const { securityChoice } = await inquirer.prompt([
+        {
+          type: "input",
+          name: "securityChoice",
+          message: "Your choice (1-3):",
+          validate: (input: string) => {
+            if (!["1", "2", "3"].includes(input.trim())) {
+              return "Please enter 1, 2, or 3";
+            }
+            return true;
+          },
+        },
+      ]);
+
+      if (securityChoice.trim() === "1") {
+        // Retirer les fichiers sensibles
+        const sensitiveFiles = securityAnalysis.secrets
+          .filter(s => s.severity === "high" && s.type === "sensitive_file")
+          .map(s => s.file);
+
+        for (const file of sensitiveFiles) {
+          await gitAnalyzer.unstageFile(file);
+          console.log(chalk.yellow(`  Removed: ${file}`));
+        }
+
+        changes = await gitAnalyzer.getStagedChanges();
+
+        if (!changes.hasChanges) {
+          console.log(chalk.yellow("\nNo changes left to commit after removing sensitive files."));
+          return;
+        }
+
+        console.log(chalk.green("\n Sensitive files removed. Continuing...\n"));
+      } else if (securityChoice.trim() === "3") {
+        console.log(chalk.red("✗ Commit cancelled"));
+        return;
+      } else {
+        console.log(chalk.yellow("\n WARNING: Proceeding with sensitive files...\n"));
+      }
+    }
+
+    if (securityAnalysis.todos.length > 0) {
+      console.log(chalk.cyan("\n TODOs/FIXMEs added:\n"));
+      securityAnalysis.todos.slice(0, 5).forEach((todo) => {
+        console.log(chalk.gray(`  [${todo.type}] ${todo.message}`));
+        console.log(chalk.gray(`     ${todo.file}\n`));
+      });
+
+      if (securityAnalysis.todos.length > 5) {
+        console.log(chalk.gray(`  ... and ${securityAnalysis.todos.length - 5} more\n`));
+      }
+    }
+
     if (analysis.suggestions.length > 0) {
-      console.log(chalk.yellow("\n Suggestions:"));
+      console.log(chalk.yellow("\n Code Quality Suggestions:"));
       analysis.suggestions.forEach((suggestion) => {
         console.log(chalk.gray(`  - ${suggestion}`));
       });
     }
 
-    // Si multiple scopes détectés, proposer le split
     if (analysis.hasMultipleScopes && analysis.groups.length > 1) {
       console.log(chalk.cyan("\n I detected changes in multiple areas:\n"));
 
       analysis.groups.forEach((group, index) => {
-        console.log(chalk.blue(`${index + 1}. ${group.label} (${group.files.length} file${group.files.length > 1 ? 's' : ''})`));
+        console.log(
+          chalk.blue(
+            `${index + 1}. ${group.label} (${group.files.length} file${
+              group.files.length > 1 ? "s" : ""
+            })`
+          )
+        );
         group.files.forEach((file) => {
           console.log(chalk.gray(`   - ${file}`));
         });
         console.log();
       });
 
-      console.log(chalk.yellow("Recommendation: These changes touch different areas."));
-      console.log(chalk.yellow("It would be better to create separate commits.\n"));
+      console.log(
+        chalk.yellow("Recommendation: These changes touch different areas.")
+      );
+      console.log(
+        chalk.yellow("It would be better to create separate commits.\n")
+      );
 
       console.log("Options:");
-      console.log(`  1) Create ${analysis.groups.length} separate commits (recommended)`);
+      console.log(
+        `  1) Create ${analysis.groups.length} separate commits (recommended)`
+      );
       console.log("  2) Create 1 single commit for everything");
 
       const { splitChoice } = await inquirer.prompt([
@@ -233,11 +328,9 @@ export async function commitCommand() {
       ]);
 
       if (splitChoice.trim() === "1") {
-        // Créer des commits séparés
         await handleMultipleCommits(gitAnalyzer, aiService, analysis.groups);
         return;
       }
-      // Sinon continuer avec un seul commit
     }
 
     const { hasContext } = await inquirer.prompt([

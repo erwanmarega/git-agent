@@ -3,6 +3,7 @@ import chalk from "chalk";
 import ora from "ora";
 import { GitAnalyzer } from "../core/git-analyzer";
 import { AIService } from "../core/ai-service";
+import { ChangeAnalyzer } from "../core/change-analyzer";
 
 async function handleCommitFlow(
   gitAnalyzer: GitAnalyzer,
@@ -78,6 +79,58 @@ async function handleCommitFlow(
   }
 }
 
+async function handleMultipleCommits(
+  gitAnalyzer: GitAnalyzer,
+  aiService: AIService,
+  groups: Array<{ label: string; scope: string; files: string[]; category: string }>
+): Promise<void> {
+  console.log(chalk.green(`\n Creating ${groups.length} separate commits...\n`));
+
+  for (let i = 0; i < groups.length; i++) {
+    const group = groups[i];
+    console.log(chalk.blue(`\n[${i + 1}/${groups.length}] ${group.label}`));
+
+    // Unstage tout
+    await gitAnalyzer.unstageAll();
+
+    // Stage uniquement les fichiers de ce groupe
+    for (const file of group.files) {
+      await gitAnalyzer.stageFile(file);
+    }
+
+    // Récupérer le diff de ce groupe
+    const groupChanges = await gitAnalyzer.getStagedChanges();
+
+    // Demander du contexte optionnel
+    const { hasContext } = await inquirer.prompt([
+      {
+        type: "confirm",
+        name: "hasContext",
+        message: `Add context for ${group.label}?`,
+        default: false,
+      },
+    ]);
+
+    let context = "";
+    if (hasContext) {
+      const answer = await inquirer.prompt([
+        {
+          type: "input",
+          name: "context",
+          message: "What are you working on?",
+          default: "",
+        },
+      ]);
+      context = answer.context;
+    }
+
+    // Générer et créer le commit
+    await handleCommitFlow(gitAnalyzer, aiService, groupChanges.diff, context);
+  }
+
+  console.log(chalk.green(`\n All ${groups.length} commits created successfully! \n`));
+}
+
 export async function commitCommand() {
   console.log(chalk.blue.bold("\n Git Agent - Interactive Commit\n"));
 
@@ -133,6 +186,59 @@ export async function commitCommand() {
     changes.files.forEach((file) => {
       console.log(chalk.gray(`  - ${file}`));
     });
+
+    // Analyse intelligente des changements
+    const changeAnalyzer = new ChangeAnalyzer();
+    const analysis = changeAnalyzer.analyzeFiles(changes.files);
+
+    // Afficher les suggestions si présentes
+    if (analysis.suggestions.length > 0) {
+      console.log(chalk.yellow("\n Suggestions:"));
+      analysis.suggestions.forEach((suggestion) => {
+        console.log(chalk.gray(`  - ${suggestion}`));
+      });
+    }
+
+    // Si multiple scopes détectés, proposer le split
+    if (analysis.hasMultipleScopes && analysis.groups.length > 1) {
+      console.log(chalk.cyan("\n I detected changes in multiple areas:\n"));
+
+      analysis.groups.forEach((group, index) => {
+        console.log(chalk.blue(`${index + 1}. ${group.label} (${group.files.length} file${group.files.length > 1 ? 's' : ''})`));
+        group.files.forEach((file) => {
+          console.log(chalk.gray(`   - ${file}`));
+        });
+        console.log();
+      });
+
+      console.log(chalk.yellow("Recommendation: These changes touch different areas."));
+      console.log(chalk.yellow("It would be better to create separate commits.\n"));
+
+      console.log("Options:");
+      console.log(`  1) Create ${analysis.groups.length} separate commits (recommended)`);
+      console.log("  2) Create 1 single commit for everything");
+
+      const { splitChoice } = await inquirer.prompt([
+        {
+          type: "input",
+          name: "splitChoice",
+          message: "Your choice (1-2):",
+          validate: (input: string) => {
+            if (!["1", "2"].includes(input.trim())) {
+              return "Please enter 1 or 2";
+            }
+            return true;
+          },
+        },
+      ]);
+
+      if (splitChoice.trim() === "1") {
+        // Créer des commits séparés
+        await handleMultipleCommits(gitAnalyzer, aiService, analysis.groups);
+        return;
+      }
+      // Sinon continuer avec un seul commit
+    }
 
     const { hasContext } = await inquirer.prompt([
       {

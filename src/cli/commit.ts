@@ -6,11 +6,66 @@ import { AIService } from "../core/ai-service";
 import { ChangeAnalyzer } from "../core/change-analyzer";
 import { SuggestionsEngine } from "../core/suggestions";
 
+async function handlePostCommitActions(gitAnalyzer: GitAnalyzer): Promise<void> {
+  const currentBranch = await gitAnalyzer.getCurrentBranch();
+  const hasRemote = await gitAnalyzer.hasRemote();
+
+  if (!hasRemote) {
+    console.log(chalk.yellow("\n No remote repository configured."));
+    console.log(chalk.gray("Tip: Add a remote with: git remote add origin <url>"));
+    return;
+  }
+
+  console.log(chalk.cyan("\n Next steps:"));
+  console.log(`  1) Push to remote (origin/${currentBranch})`);
+  console.log("  2) Stay local");
+
+  const { pushChoice } = await inquirer.prompt([
+    {
+      type: "input",
+      name: "pushChoice",
+      message: "Your choice (1-2):",
+      validate: (input: string) => {
+        if (!["1", "2"].includes(input.trim())) {
+          return "Please enter 1 or 2";
+        }
+        return true;
+      },
+    },
+  ]);
+
+  if (pushChoice.trim() === "1") {
+    const branchRemote = await gitAnalyzer.getBranchRemote(currentBranch);
+    const needsUpstream = !branchRemote;
+
+    const spinner = ora("Pushing to remote...").start();
+
+    try {
+      await gitAnalyzer.push(currentBranch, needsUpstream);
+
+      if (needsUpstream) {
+        spinner.succeed(chalk.green(`✓ Pushed to origin/${currentBranch} (upstream set)`));
+      } else {
+        spinner.succeed(chalk.green(`✓ Pushed to origin/${currentBranch}`));
+      }
+    } catch (error) {
+      spinner.fail("Push failed");
+      if (error instanceof Error) {
+        console.error(chalk.red(`\n Error: ${error.message}`));
+        console.log(chalk.yellow("\nTip: Make sure you have access to the remote repository"));
+      }
+    }
+  } else {
+    console.log(chalk.gray("\n Staying local. You can push later with: git push"));
+  }
+}
+
 async function handleCommitFlow(
   gitAnalyzer: GitAnalyzer,
   aiService: AIService,
   diff: string,
-  context: string
+  context: string,
+  skipPostActions: boolean = false
 ): Promise<void> {
   const aiSpinner = ora("Generating commit message...").start();
   const commitMessage = await aiService.generateCommitMessage(diff, context);
@@ -54,6 +109,8 @@ async function handleCommitFlow(
     await gitAnalyzer.createCommit(commitMessage);
     spinner.succeed(chalk.green("✓ Commit created successfully!"));
     console.log(chalk.gray(`\nCommit message: ${commitMessage}`));
+
+    await handlePostCommitActions(gitAnalyzer);
   } else if (action === "edit") {
     const { editedMessage } = await inquirer.prompt([
       {
@@ -69,12 +126,14 @@ async function handleCommitFlow(
       await gitAnalyzer.createCommit(editedMessage);
       spinner.succeed(chalk.green("✓ Commit created with edited message!"));
       console.log(chalk.gray(`\nCommit message: ${editedMessage}`));
+
+      await handlePostCommitActions(gitAnalyzer);
     } else {
       console.log(chalk.red("✗ Empty commit message, cancelled"));
     }
   } else if (action === "regenerate") {
     console.log(chalk.yellow("\n Regenerating...\n"));
-    await handleCommitFlow(gitAnalyzer, aiService, diff, context);
+    await handleCommitFlow(gitAnalyzer, aiService, diff, context, skipPostActions);
   } else {
     console.log(chalk.red("✗ Commit cancelled"));
   }
@@ -128,12 +187,14 @@ async function handleMultipleCommits(
       context = answer.context;
     }
 
-    await handleCommitFlow(gitAnalyzer, aiService, groupChanges.diff, context);
+    await handleCommitFlow(gitAnalyzer, aiService, groupChanges.diff, context, true);
   }
 
   console.log(
     chalk.green(`\n All ${groups.length} commits created successfully! \n`)
   );
+
+  await handlePostCommitActions(gitAnalyzer);
 }
 
 export async function commitCommand() {
@@ -238,7 +299,6 @@ export async function commitCommand() {
       ]);
 
       if (securityChoice.trim() === "1") {
-        // Retirer les fichiers sensibles
         const sensitiveFiles = securityAnalysis.secrets
           .filter(s => s.severity === "high" && s.type === "sensitive_file")
           .map(s => s.file);

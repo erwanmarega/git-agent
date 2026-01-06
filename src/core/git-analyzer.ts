@@ -41,4 +41,31 @@ export class GitAnalyzer {
   async unstageFile(file: string): Promise<void> {
     await this.git.reset(["HEAD", "--", file]);
   }
+
+  async getCurrentBranch(): Promise<string> {
+    const status = await this.git.status();
+    return status.current || "main";
+  }
+
+  async hasRemote(): Promise<boolean> {
+    const remotes = await this.git.getRemotes();
+    return remotes.length > 0;
+  }
+
+  async getBranchRemote(branch: string): Promise<string | null> {
+    try {
+      const remote = await this.git.raw(["config", `branch.${branch}.remote`]);
+      return remote.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async push(branch: string, setUpstream: boolean = false): Promise<void> {
+    if (setUpstream) {
+      await this.git.push(["-u", "origin", branch]);
+    } else {
+      await this.git.push();
+    }
+  }
 }

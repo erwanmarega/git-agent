@@ -29,4 +29,12 @@ export class GitAnalyzer {
   async stageAll(): Promise<void> {
     await this.git.add(".");
   }
+
+  async stageFile(file: string): Promise<void> {
+    await this.git.add(file);
+  }
+
+  async unstageAll(): Promise<void> {
+    await this.git.reset(["HEAD"]);
+  }
 }

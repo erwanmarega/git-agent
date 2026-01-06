@@ -5,14 +5,21 @@ import { GitAnalyzer } from "../core/git-analyzer";
 import { AIService } from "../core/ai-service";
 import { ChangeAnalyzer } from "../core/change-analyzer";
 import { SuggestionsEngine } from "../core/suggestions";
+import { BranchSuggester } from "../core/branch-suggester";
+import { PRManager } from "../core/pr-manager";
+import { ReviewerSuggester } from "../core/reviewer-suggester";
 
-async function handlePostCommitActions(gitAnalyzer: GitAnalyzer): Promise<void> {
+async function handlePostCommitActions(
+  gitAnalyzer: GitAnalyzer
+): Promise<void> {
   const currentBranch = await gitAnalyzer.getCurrentBranch();
   const hasRemote = await gitAnalyzer.hasRemote();
 
   if (!hasRemote) {
     console.log(chalk.yellow("\n No remote repository configured."));
-    console.log(chalk.gray("Tip: Add a remote with: git remote add origin <url>"));
+    console.log(
+      chalk.gray("Tip: Add a remote with: git remote add origin <url>")
+    );
     return;
   }
 
@@ -44,19 +51,376 @@ async function handlePostCommitActions(gitAnalyzer: GitAnalyzer): Promise<void> 
       await gitAnalyzer.push(currentBranch, needsUpstream);
 
       if (needsUpstream) {
-        spinner.succeed(chalk.green(`✓ Pushed to origin/${currentBranch} (upstream set)`));
+        spinner.succeed(
+          chalk.green(`✓ Pushed to origin/${currentBranch} (upstream set)`)
+        );
       } else {
         spinner.succeed(chalk.green(`✓ Pushed to origin/${currentBranch}`));
       }
+
+      const changedFiles = await gitAnalyzer.getStagedChanges();
+      await handlePRCreation(gitAnalyzer, currentBranch, changedFiles.files);
     } catch (error) {
       spinner.fail("Push failed");
       if (error instanceof Error) {
         console.error(chalk.red(`\n Error: ${error.message}`));
-        console.log(chalk.yellow("\nTip: Make sure you have access to the remote repository"));
+        console.log(
+          chalk.yellow(
+            "\nTip: Make sure you have access to the remote repository"
+          )
+        );
       }
     }
   } else {
-    console.log(chalk.gray("\n Staying local. You can push later with: git push"));
+    console.log(
+      chalk.gray("\n Staying local. You can push later with: git push")
+    );
+  }
+}
+
+async function handlePRCreation(
+  gitAnalyzer: GitAnalyzer,
+  currentBranch: string,
+  files: string[] = []
+): Promise<void> {
+  const prManager = new PRManager();
+
+  const isGitHubCLI = await prManager.isGitHubCLIInstalled();
+
+  if (!isGitHubCLI) {
+    console.log(
+      chalk.yellow(
+        "\n GitHub CLI (gh) not installed. Install it to create PRs automatically."
+      )
+    );
+    console.log(chalk.gray("Visit: https://cli.github.com/"));
+    return;
+  }
+
+  const isGitHub = await prManager.isGitHubRepo();
+
+  if (!isGitHub) {
+    console.log(
+      chalk.gray("\n Not a GitHub repository. Skipping PR creation.")
+    );
+    return;
+  }
+
+  const isMainBranch = await gitAnalyzer.isMainBranch();
+  if (isMainBranch) {
+    return;
+  }
+
+  console.log(chalk.cyan("\n Create a Pull Request?"));
+  console.log("  1) Yes, create PR");
+  console.log("  2) No, skip");
+
+  const { prChoice } = await inquirer.prompt([
+    {
+      type: "input",
+      name: "prChoice",
+      message: "Your choice (1-2):",
+      validate: (input: string) => {
+        if (!["1", "2"].includes(input.trim())) {
+          return "Please enter 1 or 2";
+        }
+        return true;
+      },
+    },
+  ]);
+
+  if (prChoice.trim() === "2") {
+    console.log(
+      chalk.gray("\n Skipped. You can create a PR later with: gh pr create")
+    );
+    return;
+  }
+
+  const spinner = ora("Preparing PR...").start();
+
+  try {
+    const commits = await prManager.getCommitsSinceMain();
+    const mainBranch = await prManager.getMainBranchName();
+
+    const title = prManager.generatePRTitle(commits);
+    const body = prManager.generatePRBody(commits);
+
+    spinner.stop();
+
+    console.log(chalk.green("\n Generated PR information:\n"));
+    console.log(chalk.cyan("Title:"));
+    console.log(chalk.white(`  ${title}\n`));
+    console.log(chalk.cyan("Description:"));
+    console.log(
+      chalk.gray(
+        body
+          .split("\n")
+          .map((l) => `  ${l}`)
+          .join("\n")
+      )
+    );
+    console.log();
+
+    console.log(chalk.cyan("Options:"));
+    console.log("  1) Create PR with this information");
+    console.log("  2) Edit title");
+    console.log("  3) Cancel");
+
+    const { confirmChoice } = await inquirer.prompt([
+      {
+        type: "input",
+        name: "confirmChoice",
+        message: "Your choice (1-3):",
+        validate: (input: string) => {
+          if (!["1", "2", "3"].includes(input.trim())) {
+            return "Please enter 1, 2, or 3";
+          }
+          return true;
+        },
+      },
+    ]);
+
+    let finalTitle = title;
+
+    if (confirmChoice.trim() === "2") {
+      const { editedTitle } = await inquirer.prompt([
+        {
+          type: "input",
+          name: "editedTitle",
+          message: "Enter PR title:",
+          default: title,
+        },
+      ]);
+      finalTitle = editedTitle;
+    } else if (confirmChoice.trim() === "3") {
+      console.log(chalk.yellow("\n✗ PR creation cancelled"));
+      return;
+    }
+
+    let selectedReviewers: string[] = [];
+
+    if (files.length > 0) {
+      const reviewerSuggester = new ReviewerSuggester();
+      const reviewSpinner = ora("Finding potential reviewers...").start();
+
+      try {
+        const reviewerSuggestions = await reviewerSuggester.suggestReviewers(
+          files
+        );
+
+        reviewSpinner.stop();
+
+        if (reviewerSuggestions.length > 0) {
+          console.log(
+            chalk.cyan("\n💡 Suggested reviewers based on file history:\n")
+          );
+
+          reviewerSuggestions.forEach((r, i) => {
+            console.log(
+              chalk.gray(
+                `  ${i + 1}) ${r.username} (${r.commits} commit${
+                  r.commits > 1 ? "s" : ""
+                }) - ${r.lastCommitDate}`
+              )
+            );
+          });
+
+          console.log(chalk.cyan("\nDo you want to add reviewers?"));
+          console.log("  1) Select from suggestions");
+          console.log("  2) Skip reviewers");
+
+          const { reviewerChoice } = await inquirer.prompt([
+            {
+              type: "input",
+              name: "reviewerChoice",
+              message: "Your choice (1-2):",
+              validate: (input: string) => {
+                if (!["1", "2"].includes(input.trim())) {
+                  return "Please enter 1 or 2";
+                }
+                return true;
+              },
+            },
+          ]);
+
+          if (reviewerChoice.trim() === "1") {
+            const { reviewerIndices } = await inquirer.prompt([
+              {
+                type: "input",
+                name: "reviewerIndices",
+                message: "Enter reviewer numbers (comma-separated, e.g., 1,3):",
+                validate: (input: string) => {
+                  if (!input.trim()) {
+                    return true;
+                  }
+                  const indices = input.split(",").map((s) => s.trim());
+                  for (const idx of indices) {
+                    const num = parseInt(idx);
+                    if (
+                      isNaN(num) ||
+                      num < 1 ||
+                      num > reviewerSuggestions.length
+                    ) {
+                      return `Please enter numbers between 1 and ${reviewerSuggestions.length}`;
+                    }
+                  }
+                  return true;
+                },
+              },
+            ]);
+
+            if (reviewerIndices.trim()) {
+              const indices = reviewerIndices
+                .split(",")
+                .map((s: string) => parseInt(s.trim()) - 1);
+              selectedReviewers = indices.map(
+                (i: number) => reviewerSuggestions[i].username
+              );
+
+              console.log(
+                chalk.green(
+                  `\n✓ Selected reviewers: ${selectedReviewers.join(", ")}`
+                )
+              );
+            }
+          }
+        } else {
+          reviewSpinner.succeed("No reviewer suggestions found");
+        }
+      } catch (error) {
+        reviewSpinner.fail("Failed to get reviewer suggestions");
+        console.log(chalk.gray("Continuing without reviewers..."));
+      }
+    }
+
+    const createSpinner = ora("Creating Pull Request...").start();
+
+    try {
+      const prUrl = await prManager.createPR(
+        finalTitle,
+        body,
+        mainBranch,
+        selectedReviewers
+      );
+      createSpinner.succeed(chalk.green("✓ Pull Request created!"));
+      console.log(chalk.cyan(`\n View PR: ${prUrl}`));
+    } catch (error) {
+      createSpinner.fail("Failed to create PR");
+      if (error instanceof Error) {
+        console.error(chalk.red(`\n Error: ${error.message}`));
+      }
+    }
+  } catch (error) {
+    spinner.fail("Failed to prepare PR");
+    if (error instanceof Error) {
+      console.error(chalk.red(`\n Error: ${error.message}`));
+    }
+  }
+}
+
+async function handleBranchCreation(
+  gitAnalyzer: GitAnalyzer,
+  files: string[],
+  diff: string
+): Promise<void> {
+  const isOnMainBranch = await gitAnalyzer.isMainBranch();
+  const currentBranch = await gitAnalyzer.getCurrentBranch();
+
+  if (!isOnMainBranch) {
+    return;
+  }
+
+  console.log(
+    chalk.yellow(
+      `\n⚠️  You are on the '${currentBranch}' branch.\nIt's recommended to create a feature branch for your changes.\n`
+    )
+  );
+
+  const branchSuggester = new BranchSuggester();
+  const suggestions = branchSuggester.generateMultipleSuggestions(files, diff);
+
+  console.log(chalk.cyan("Suggested branch names:"));
+  suggestions.forEach((suggestion, i) => {
+    console.log(chalk.gray(`  ${i + 1}) ${suggestion}`));
+  });
+  console.log(chalk.gray(`  ${suggestions.length + 1}) Enter custom name`));
+  console.log(
+    chalk.gray(`  ${suggestions.length + 2}) Stay on ${currentBranch}`)
+  );
+
+  const { branchChoice } = await inquirer.prompt([
+    {
+      type: "input",
+      name: "branchChoice",
+      message: `Your choice (1-${suggestions.length + 2}):`,
+      validate: (input: string) => {
+        const num = parseInt(input.trim());
+        if (isNaN(num) || num < 1 || num > suggestions.length + 2) {
+          return `Please enter a number between 1 and ${
+            suggestions.length + 2
+          }`;
+        }
+        return true;
+      },
+    },
+  ]);
+
+  const choiceNum = parseInt(branchChoice.trim());
+
+  if (choiceNum <= suggestions.length) {
+    const branchName = suggestions[choiceNum - 1];
+    const spinner = ora(`Creating branch '${branchName}'...`).start();
+
+    try {
+      await gitAnalyzer.createBranch(branchName);
+      spinner.succeed(
+        chalk.green(`✓ Created and switched to branch '${branchName}'`)
+      );
+    } catch (error) {
+      spinner.fail("Failed to create branch");
+      if (error instanceof Error) {
+        console.error(chalk.red(`\n❌ Error: ${error.message}`));
+      }
+      throw error;
+    }
+  } else if (choiceNum === suggestions.length + 1) {
+    const { customBranchName } = await inquirer.prompt([
+      {
+        type: "input",
+        name: "customBranchName",
+        message: "Enter branch name:",
+        validate: (input: string) => {
+          if (!input.trim()) {
+            return "Branch name cannot be empty";
+          }
+          if (!/^[a-zA-Z0-9/_-]+$/.test(input.trim())) {
+            return "Invalid branch name. Use only letters, numbers, /, - and _";
+          }
+          return true;
+        },
+      },
+    ]);
+
+    const spinner = ora(`Creating branch '${customBranchName}'...`).start();
+
+    try {
+      await gitAnalyzer.createBranch(customBranchName);
+      spinner.succeed(
+        chalk.green(`✓ Created and switched to branch '${customBranchName}'`)
+      );
+    } catch (error) {
+      spinner.fail("Failed to create branch");
+      if (error instanceof Error) {
+        console.error(chalk.red(`\n❌ Error: ${error.message}`));
+      }
+      throw error;
+    }
+  } else {
+    console.log(
+      chalk.yellow(
+        `\n⚠️  Staying on '${currentBranch}'. Be careful when committing!`
+      )
+    );
   }
 }
 
@@ -133,7 +497,13 @@ async function handleCommitFlow(
     }
   } else if (action === "regenerate") {
     console.log(chalk.yellow("\n Regenerating...\n"));
-    await handleCommitFlow(gitAnalyzer, aiService, diff, context, skipPostActions);
+    await handleCommitFlow(
+      gitAnalyzer,
+      aiService,
+      diff,
+      context,
+      skipPostActions
+    );
   } else {
     console.log(chalk.red("✗ Commit cancelled"));
   }
@@ -187,7 +557,13 @@ async function handleMultipleCommits(
       context = answer.context;
     }
 
-    await handleCommitFlow(gitAnalyzer, aiService, groupChanges.diff, context, true);
+    await handleCommitFlow(
+      gitAnalyzer,
+      aiService,
+      groupChanges.diff,
+      context,
+      true
+    );
   }
 
   console.log(
@@ -260,11 +636,16 @@ export async function commitCommand() {
       console.log(chalk.gray(`  - ${file}`));
     });
 
+    await handleBranchCreation(gitAnalyzer, changes.files, changes.diff);
+
     const changeAnalyzer = new ChangeAnalyzer();
     const analysis = changeAnalyzer.analyzeFiles(changes.files);
 
     const suggestionsEngine = new SuggestionsEngine();
-    const securityAnalysis = suggestionsEngine.analyze(changes.files, changes.diff);
+    const securityAnalysis = suggestionsEngine.analyze(
+      changes.files,
+      changes.diff
+    );
 
     if (securityAnalysis.hasHighSeverity) {
       console.log(chalk.red.bold("\n SECURITY ALERT!\n"));
@@ -277,7 +658,11 @@ export async function commitCommand() {
         }
       });
 
-      console.log(chalk.red("These files contain sensitive information that should NOT be committed!\n"));
+      console.log(
+        chalk.red(
+          "These files contain sensitive information that should NOT be committed!\n"
+        )
+      );
 
       console.log("Options:");
       console.log("  1) Remove sensitive files from commit (recommended)");
@@ -300,8 +685,8 @@ export async function commitCommand() {
 
       if (securityChoice.trim() === "1") {
         const sensitiveFiles = securityAnalysis.secrets
-          .filter(s => s.severity === "high" && s.type === "sensitive_file")
-          .map(s => s.file);
+          .filter((s) => s.severity === "high" && s.type === "sensitive_file")
+          .map((s) => s.file);
 
         for (const file of sensitiveFiles) {
           await gitAnalyzer.unstageFile(file);
@@ -311,7 +696,11 @@ export async function commitCommand() {
         changes = await gitAnalyzer.getStagedChanges();
 
         if (!changes.hasChanges) {
-          console.log(chalk.yellow("\nNo changes left to commit after removing sensitive files."));
+          console.log(
+            chalk.yellow(
+              "\nNo changes left to commit after removing sensitive files."
+            )
+          );
           return;
         }
 
@@ -320,7 +709,9 @@ export async function commitCommand() {
         console.log(chalk.red("✗ Commit cancelled"));
         return;
       } else {
-        console.log(chalk.yellow("\n WARNING: Proceeding with sensitive files...\n"));
+        console.log(
+          chalk.yellow("\n WARNING: Proceeding with sensitive files...\n")
+        );
       }
     }
 
@@ -332,7 +723,9 @@ export async function commitCommand() {
       });
 
       if (securityAnalysis.todos.length > 5) {
-        console.log(chalk.gray(`  ... and ${securityAnalysis.todos.length - 5} more\n`));
+        console.log(
+          chalk.gray(`  ... and ${securityAnalysis.todos.length - 5} more\n`)
+        );
       }
     }
 

@@ -68,4 +68,18 @@ export class GitAnalyzer {
       await this.git.push();
     }
   }
+
+  async isMainBranch(): Promise<boolean> {
+    const currentBranch = await this.getCurrentBranch();
+    return ["main", "master", "develop"].includes(currentBranch);
+  }
+
+  async createBranch(branchName: string): Promise<void> {
+    await this.git.checkoutLocalBranch(branchName);
+  }
+
+  async getAllBranches(): Promise<string[]> {
+    const branches = await this.git.branchLocal();
+    return branches.all;
+  }
 }

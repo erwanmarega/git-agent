@@ -37,4 +37,8 @@ export class GitAnalyzer {
   async unstageAll(): Promise<void> {
     await this.git.reset(["HEAD"]);
   }
+
+  async unstageFile(file: string): Promise<void> {
+    await this.git.reset(["HEAD", "--", file]);
+  }
 }

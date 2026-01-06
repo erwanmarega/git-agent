@@ -87,13 +87,11 @@ export async function commitCommand() {
   const spinner = ora("Analyzing your changes...").start();
 
   try {
-    // Check for unstaged changes
     const status = await gitAnalyzer.getStatus();
     const hasUnstagedChanges = status.modified.length > 0 || status.not_added.length > 0;
 
     let changes = await gitAnalyzer.getStagedChanges();
 
-    // If no staged changes but there are unstaged changes, ask to stage them
     if (!changes.hasChanges && hasUnstagedChanges) {
       spinner.stop();
 

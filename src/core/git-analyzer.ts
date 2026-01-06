@@ -82,4 +82,22 @@ export class GitAnalyzer {
     const branches = await this.git.branchLocal();
     return branches.all;
   }
+
+  async getLastCommitMessage(): Promise<string> {
+    try {
+      const log = await this.git.log({ maxCount: 1 });
+      return log.latest?.message || "";
+    } catch {
+      return "";
+    }
+  }
+
+  async getLastCommitSha(): Promise<string> {
+    try {
+      const log = await this.git.log({ maxCount: 1 });
+      return log.latest?.hash || "";
+    } catch {
+      return "";
+    }
+  }
 }

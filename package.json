@@ -19,12 +19,15 @@
   "type": "commonjs",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
+    "@tailwindcss/postcss": "^4.1.18",
     "chalk": "^5.6.2",
     "commander": "^14.0.2",
     "dotenv": "^17.2.3",
     "inquirer": "^13.1.0",
     "ora": "^9.0.0",
-    "simple-git": "^3.30.0"
+    "postcss": "^8.5.6",
+    "simple-git": "^3.30.0",
+    "tailwindcss": "^4.1.18"
   },
   "devDependencies": {
     "@types/commander": "^2.12.0",

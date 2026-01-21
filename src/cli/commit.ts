@@ -1,6 +1,8 @@
 import inquirer from "inquirer";
 import chalk from "chalk";
 import ora from "ora";
+import { exec } from "child_process";
+import { promisify } from "util";
 import { GitAnalyzer } from "../core/git-analyzer";
 import { AIService } from "../core/ai-service";
 import { ChangeAnalyzer } from "../core/change-analyzer";
@@ -8,6 +10,9 @@ import { SuggestionsEngine } from "../core/suggestions";
 import { BranchSuggester } from "../core/branch-suggester";
 import { PRManager } from "../core/pr-manager";
 import { ReviewerSuggester } from "../core/reviewer-suggester";
+import { JiraManager } from "../core/jira-manager";
+
+const execAsync = promisify(exec);
 
 async function handlePostCommitActions(
   gitAnalyzer: GitAnalyzer
@@ -58,8 +63,16 @@ async function handlePostCommitActions(
         spinner.succeed(chalk.green(`✓ Pushed to origin/${currentBranch}`));
       }
 
+      const commitMessage = await gitAnalyzer.getLastCommitMessage();
+      const ticketId = await handleJiraIntegration(currentBranch, commitMessage);
+
       const changedFiles = await gitAnalyzer.getStagedChanges();
-      await handlePRCreation(gitAnalyzer, currentBranch, changedFiles.files);
+      await handlePRCreation(
+        gitAnalyzer,
+        currentBranch,
+        changedFiles.files,
+        ticketId
+      );
     } catch (error) {
       spinner.fail("Push failed");
       if (error instanceof Error) {
@@ -81,7 +94,8 @@ async function handlePostCommitActions(
 async function handlePRCreation(
   gitAnalyzer: GitAnalyzer,
   currentBranch: string,
-  files: string[] = []
+  files: string[] = [],
+  jiraTicketId?: string | null
 ): Promise<void> {
   const prManager = new PRManager();
 
@@ -304,6 +318,36 @@ async function handlePRCreation(
       );
       createSpinner.succeed(chalk.green("✓ Pull Request created!"));
       console.log(chalk.cyan(`\n View PR: ${prUrl}`));
+
+      if (jiraTicketId) {
+        const jiraSpinner = ora(
+          `Linking PR to Jira ticket ${jiraTicketId}...`
+        ).start();
+
+        try {
+          const jiraManager = new JiraManager();
+
+          const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
+          const prNumber = prNumberMatch
+            ? parseInt(prNumberMatch[1])
+            : undefined;
+
+          await jiraManager.linkPR({
+            issueKey: jiraTicketId,
+            prUrl,
+            prTitle: finalTitle,
+            prNumber,
+          });
+
+          await jiraManager.transitionOnPR(jiraTicketId);
+
+          jiraSpinner.succeed(
+            chalk.green(`✓ PR linked to Jira ticket ${jiraTicketId}`)
+          );
+        } catch (error) {
+          jiraSpinner.warn("Could not link PR to Jira");
+        }
+      }
     } catch (error) {
       createSpinner.fail("Failed to create PR");
       if (error instanceof Error) {
@@ -315,6 +359,176 @@ async function handlePRCreation(
     if (error instanceof Error) {
       console.error(chalk.red(`\n Error: ${error.message}`));
     }
+  }
+}
+
+async function handleJiraIntegration(
+  currentBranch: string,
+  commitMessage: string,
+  commitSha?: string
+): Promise<string | null> {
+  const jiraConfigured =
+    process.env.JIRA_BASE_URL &&
+    process.env.JIRA_EMAIL &&
+    process.env.JIRA_API_TOKEN;
+
+  if (!jiraConfigured) {
+    return null;
+  }
+
+  try {
+    const jiraManager = new JiraManager();
+    const extraction = jiraManager.extractTicketFromBranch(currentBranch);
+
+    if (!extraction.ticketId) {
+      console.log(chalk.cyan("\n No Jira ticket found in branch name."));
+      console.log("Options:");
+      console.log("  1) Create new Jira ticket");
+      console.log("  2) Link to existing ticket (manual)");
+      console.log("  3) Skip Jira integration");
+
+      const { jiraChoice } = await inquirer.prompt([
+        {
+          type: "input",
+          name: "jiraChoice",
+          message: "Your choice (1-3):",
+          validate: (input: string) => {
+            if (!["1", "2", "3"].includes(input.trim())) {
+              return "Please enter 1, 2, or 3";
+            }
+            return true;
+          },
+        },
+      ]);
+
+      if (jiraChoice.trim() === "3") {
+        return null;
+      }
+
+      if (jiraChoice.trim() === "2") {
+        const { manualTicketId } = await inquirer.prompt([
+          {
+            type: "input",
+            name: "manualTicketId",
+            message: "Enter Jira ticket ID (e.g., DP-1):",
+            validate: (input: string) => {
+              if (!input || input.trim().length === 0) {
+                return "Ticket ID is required";
+              }
+              if (!/^[A-Z]+-\d+$/i.test(input.trim())) {
+                return "Invalid format. Use format like DP-1, PROJ-123, etc.";
+              }
+              return true;
+            },
+          },
+        ]);
+
+        extraction.ticketId = manualTicketId.trim().toUpperCase();
+      } else {
+        const { ticketSummary } = await inquirer.prompt([
+          {
+            type: "input",
+            name: "ticketSummary",
+            message: "Enter ticket summary:",
+            default: commitMessage.split("\n")[0],
+          },
+        ]);
+
+        const spinner = ora("Creating Jira ticket...").start();
+        const newTicketKey = await jiraManager.createIssue(
+          ticketSummary,
+          `Branch: ${currentBranch}\nCommit: ${commitMessage}`
+        );
+
+        if (newTicketKey) {
+          spinner.succeed(chalk.green(`✓ Jira ticket created: ${newTicketKey}`));
+          extraction.ticketId = newTicketKey;
+        } else {
+          spinner.fail("Failed to create Jira ticket");
+          return null;
+        }
+      }
+    }
+
+    const ticketId = extraction.ticketId;
+    if (!ticketId) {
+      return null;
+    }
+
+    const spinner = ora(`Updating Jira ticket ${ticketId}...`).start();
+
+    const issue = await jiraManager.getIssue(ticketId);
+    if (!issue) {
+      spinner.fail(`Jira ticket ${ticketId} not found`);
+      console.log(chalk.yellow("Continuing without Jira integration..."));
+      return null;
+    }
+
+    spinner.text = `Linking commit to ${ticketId}...`;
+
+    let sha = commitSha;
+    if (!sha) {
+      const { stdout } = await execAsync("git rev-parse HEAD");
+      sha = stdout.trim();
+    }
+
+    let commitUrl: string | undefined;
+    try {
+      const { stdout } = await execAsync("git config --get remote.origin.url");
+      const remoteUrl = stdout.trim();
+      if (remoteUrl.includes("github.com")) {
+        const match = remoteUrl.match(/github\.com[:/](.+?)(\.git)?$/);
+        if (match) {
+          const repo = match[1].replace(".git", "");
+          commitUrl = `https://github.com/${repo}/commit/${sha}`;
+        }
+      }
+    } catch {
+    }
+
+    const linked = await jiraManager.linkCommit({
+      issueKey: ticketId,
+      commitSha: sha,
+      commitMessage,
+      commitUrl,
+      branch: currentBranch,
+    });
+
+    if (!linked) {
+      spinner.warn(`Could not link commit to ${ticketId}`);
+      return ticketId;
+    }
+
+    const currentStatus = issue.fields.status.name;
+    if (
+      currentStatus.toLowerCase() === "to do" ||
+      currentStatus.toLowerCase() === "open" ||
+      currentStatus.toLowerCase() === "backlog"
+    ) {
+      spinner.text = `Transitioning ${ticketId} to In Progress...`;
+      const transitioned = await jiraManager.transitionOnCommit(ticketId);
+
+      if (transitioned) {
+        spinner.succeed(
+          chalk.green(
+            `✓ Jira ticket ${ticketId} updated and moved to In Progress`
+          )
+        );
+      } else {
+        spinner.succeed(chalk.green(`✓ Commit linked to ${ticketId}`));
+      }
+    } else {
+      spinner.succeed(chalk.green(`✓ Commit linked to ${ticketId}`));
+    }
+
+    return ticketId;
+  } catch (error) {
+    console.log(chalk.yellow("\n⚠ Warning: Jira integration failed"));
+    if (error instanceof Error) {
+      console.log(chalk.gray(`  ${error.message}`));
+    }
+    console.log(chalk.gray("Continuing without Jira..."));
+    return null;
   }
 }
 

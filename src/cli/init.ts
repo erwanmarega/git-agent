@@ -1,7 +1,9 @@
 import inquirer from "inquirer";
 import chalk from "chalk";
+import ora from "ora";
 import * as fs from "fs";
 import * as path from "path";
+import { JiraManager } from "../core/jira-manager";
 
 export async function initCommand() {
   console.log(chalk.blue.bold("\n Git Agent - Setup\n"));
@@ -67,13 +69,107 @@ export async function initCommand() {
     },
   ]);
 
+  console.log(chalk.gray("\n"));
+  const { configureJira } = await inquirer.prompt([
+    {
+      type: "confirm",
+      name: "configureJira",
+      message: "Do you want to configure Jira integration? (optional)",
+      default: false,
+    },
+  ]);
+
+  let jiraConfig = "";
+
+  if (configureJira) {
+    const jiraAnswers = await inquirer.prompt([
+      {
+        type: "input",
+        name: "baseUrl",
+        message: "Jira base URL (e.g., https://yourcompany.atlassian.net):",
+        validate: (input: string) => {
+          if (!input.startsWith("http")) {
+            return "URL must start with http:// or https://";
+          }
+          return true;
+        },
+      },
+      {
+        type: "input",
+        name: "email",
+        message: "Jira email:",
+        validate: (input: string) => {
+          if (!input.includes("@")) {
+            return "Please enter a valid email";
+          }
+          return true;
+        },
+      },
+      {
+        type: "password",
+        name: "apiToken",
+        message:
+          "Jira API token (from https://id.atlassian.com/manage/api-tokens):",
+        validate: (input: string) => {
+          if (!input || input.trim().length === 0) {
+            return "API token is required";
+          }
+          return true;
+        },
+      },
+      {
+        type: "input",
+        name: "projectKey",
+        message: "Default Jira project key (e.g., PROJ):",
+        default: "",
+      },
+    ]);
+
+    const validateSpinner = ora("Validating Jira connection...").start();
+
+    try {
+      const jiraManager = new JiraManager({
+        baseUrl: jiraAnswers.baseUrl,
+        email: jiraAnswers.email,
+        apiToken: jiraAnswers.apiToken,
+        projectKey: jiraAnswers.projectKey,
+      });
+
+      const isValid = await jiraManager.validateConnection();
+
+      if (isValid) {
+        validateSpinner.succeed(chalk.green("✓ Jira connection validated"));
+      } else {
+        validateSpinner.fail("Jira connection failed");
+        console.log(
+          chalk.yellow(
+            "Continuing anyway - you can fix credentials later in .env"
+          )
+        );
+      }
+    } catch (error) {
+      validateSpinner.fail("Could not validate Jira connection");
+      console.log(
+        chalk.yellow("Continuing anyway - you can fix credentials later in .env")
+      );
+    }
+
+    jiraConfig = `
+# Jira Integration
+JIRA_BASE_URL=${jiraAnswers.baseUrl}
+JIRA_EMAIL=${jiraAnswers.email}
+JIRA_API_TOKEN=${jiraAnswers.apiToken}
+JIRA_PROJECT_KEY=${jiraAnswers.projectKey}
+`;
+  }
+
   const envContent = `# Anthropic API Key (required for AI features)
 # Get your key at: https://console.anthropic.com/
 ANTHROPIC_API_KEY=${apiKey}
 
 # Model to use
 ANTHROPIC_MODEL=${model}
-`;
+${jiraConfig}`;
 
   try {
     fs.writeFileSync(envPath, envContent);

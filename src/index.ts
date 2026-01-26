@@ -1,23 +1,38 @@
-import "dotenv/config";
-import { Command } from "commander";
-import { commitCommand } from "./cli/commit";
-import { initCommand } from "./cli/init";
+/**
+ * Git Agent - AI-powered Git assistant
+ * @packageDocumentation
+ */
 
-const program = new Command();
+// Core services
+export { AIService } from "./core/ai-service";
+export { GitAnalyzer } from "./core/git-analyzer";
+export { ChangeAnalyzer, FileGroup, AnalysisResult } from "./core/change-analyzer";
+export { BranchSuggester } from "./core/branch-suggester";
+export { PRManager, PRInfo } from "./core/pr-manager";
+export { ReviewerSuggester, ReviewerSuggestion } from "./core/reviewer-suggester";
+export {
+  JiraManager,
+  JiraConfig,
+  JiraIssue,
+  JiraTransition,
+  JiraLinkCommitParams,
+  JiraLinkPRParams,
+  TicketExtractionResult,
+} from "./core/jira-manager";
 
-program
-  .name("git-agent")
-  .description("AI-powered Git assistant")
-  .version("0.1.0");
+// Suggestions & Security
+export {
+  SuggestionsEngine,
+  SuggestionResult,
+  SecretsDetector,
+  SecretDetection,
+  TodosDetector,
+  TodoDetection,
+} from "./core/suggestions";
 
-program
-  .command("init")
-  .description("Initialize Git Agent configuration")
-  .action(initCommand);
+// CLI commands (for programmatic use)
+export { commitCommand } from "./cli/commit";
+export { initCommand } from "./cli/init";
 
-program
-  .command("commit")
-  .description("Interactive commit with AI assistance")
-  .action(commitCommand);
-
-program.parse();
+// Version
+export const VERSION = "1.0.0";

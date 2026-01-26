@@ -35,3 +35,11 @@ coverage/
 # Temporary files
 *.tmp
 .cache/
+
+# Test files
+test-*.ts
+test-*.js
+test.txt
+README-test.md
+src/api/test.js
+src/components/test.vue

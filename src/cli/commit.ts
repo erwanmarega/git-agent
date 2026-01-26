@@ -64,7 +64,10 @@ async function handlePostCommitActions(
       }
 
       const commitMessage = await gitAnalyzer.getLastCommitMessage();
-      const ticketId = await handleJiraIntegration(currentBranch, commitMessage);
+      const ticketId = await handleJiraIntegration(
+        currentBranch,
+        commitMessage
+      );
 
       const changedFiles = await gitAnalyzer.getStagedChanges();
       await handlePRCreation(
@@ -441,7 +444,9 @@ async function handleJiraIntegration(
         );
 
         if (newTicketKey) {
-          spinner.succeed(chalk.green(`✓ Jira ticket created: ${newTicketKey}`));
+          spinner.succeed(
+            chalk.green(`✓ Jira ticket created: ${newTicketKey}`)
+          );
           extraction.ticketId = newTicketKey;
         } else {
           spinner.fail("Failed to create Jira ticket");
@@ -483,8 +488,7 @@ async function handleJiraIntegration(
           commitUrl = `https://github.com/${repo}/commit/${sha}`;
         }
       }
-    } catch {
-    }
+    } catch {}
 
     const linked = await jiraManager.linkCommit({
       issueKey: ticketId,
@@ -787,8 +791,22 @@ async function handleMultipleCommits(
   await handlePostCommitActions(gitAnalyzer);
 }
 
+function displayWelcome(): void {
+  console.clear();
+  console.log();
+  console.log(chalk.magenta.bold("   ██████╗ ██╗████████╗     █████╗  ██████╗ ███████╗███╗   ██╗████████╗"));
+  console.log(chalk.magenta.bold("  ██╔════╝ ██║╚══██╔══╝    ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝"));
+  console.log(chalk.magenta.bold("  ██║  ███╗██║   ██║       ███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   "));
+  console.log(chalk.magenta.bold("  ██║   ██║██║   ██║       ██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   "));
+  console.log(chalk.magenta.bold("  ╚██████╔╝██║   ██║       ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   "));
+  console.log(chalk.magenta.bold("   ╚═════╝ ╚═╝   ╚═╝       ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   "));
+  console.log();
+  console.log(chalk.gray("  Assistant IA pour des commits intelligents"));
+  console.log();
+}
+
 export async function commitCommand() {
-  console.log(chalk.blue.bold("\n Git Agent - Interactive Commit\n"));
+  displayWelcome();
 
   const gitAnalyzer = new GitAnalyzer();
   const aiService = new AIService();

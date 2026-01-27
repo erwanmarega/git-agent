@@ -43,3 +43,6 @@ test.txt
 README-test.md
 src/api/test.js
 src/components/test.vue
+
+# Git Agent
+.git-agent/

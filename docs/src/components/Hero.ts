@@ -1,6 +1,6 @@
 export function renderHero(): string {
   return `
-    <section class="pt-32 pb-20 px-6 relative overflow-hidden">
+    <section class="pt-16 pb-20 px-6 relative overflow-hidden">
       <!-- Background gradient -->
       <div class="absolute inset-0 bg-gradient-to-b from-primary-500/10 via-transparent to-transparent pointer-events-none"></div>
       <div class="absolute top-20 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-primary-500/20 rounded-full blur-3xl pointer-events-none"></div>

@@ -1,6 +1,6 @@
 export function renderConfiguration(): string {
   return `
-    <section class="pt-32 pb-20 px-6">
+    <section class="pt-8 pb-20 px-6">
       <div class="max-w-4xl mx-auto">
         <div class="mb-12">
           <h1 class="section-title">Configuration</h1>

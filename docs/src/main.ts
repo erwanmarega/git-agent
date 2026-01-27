@@ -4,11 +4,12 @@ import { renderHero } from "./components/Hero";
 import { renderFeatures } from "./components/Features";
 import { renderInstallation } from "./components/Installation";
 import { renderUsage } from "./components/Usage";
+import { renderLocalDev } from "./components/LocalDev";
 import { renderAPI } from "./components/API";
 import { renderConfiguration } from "./components/Configuration";
 import { renderFooter } from "./components/Footer";
 
-type Section = "home" | "installation" | "usage" | "api" | "configuration";
+type Section = "home" | "installation" | "usage" | "local" | "api" | "configuration";
 
 let currentSection: Section = "home";
 
@@ -27,7 +28,7 @@ function handleHashChange(): void {
   const hash = window.location.hash.slice(1) as Section;
   if (
     hash &&
-    ["installation", "usage", "api", "configuration"].includes(hash)
+    ["installation", "usage", "local", "api", "configuration"].includes(hash)
   ) {
     currentSection = hash;
   } else {
@@ -64,6 +65,8 @@ function render(): void {
     content += renderInstallation();
   } else if (currentSection === "usage") {
     content += renderUsage();
+  } else if (currentSection === "local") {
+    content += renderLocalDev();
   } else if (currentSection === "api") {
     content += renderAPI();
   } else if (currentSection === "configuration") {

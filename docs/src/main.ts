@@ -44,12 +44,14 @@ function render(): void {
 
   content += renderNavbar(currentSection);
 
+  content += '<main class="main-content">';
+
   if (currentSection === "home") {
     content += renderHero();
     content += renderFeatures();
     content += `
       <section class="py-20 px-6">
-        <div class="max-w-6xl mx-auto text-center">
+        <div class="max-w-4xl mx-auto text-center">
           <h2 class="section-title">Prêt à commencer ?</h2>
           <p class="section-subtitle mx-auto mb-8">Installez Git Agent en quelques secondes et transformez votre workflow Git.</p>
           <button onclick="navigateTo('installation')" class="btn-primary">
@@ -74,6 +76,8 @@ function render(): void {
   }
 
   content += renderFooter();
+
+  content += '</main>';
 
   app.innerHTML = content;
 

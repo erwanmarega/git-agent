@@ -28,6 +28,10 @@ export function renderUsage(): string {
                   <td class="py-3 px-4"><code class="code-inline">git-agent commit</code></td>
                   <td class="py-3 px-4 text-dark-400">Lancer le workflow de commit interactif avec IA</td>
                 </tr>
+                <tr class="border-b border-dark-800">
+                  <td class="py-3 px-4"><code class="code-inline">git-agent learn</code></td>
+                  <td class="py-3 px-4 text-dark-400">Apprendre le style de commit du repository</td>
+                </tr>
                 <tr>
                   <td class="py-3 px-4"><code class="code-inline">git-agent --version</code></td>
                   <td class="py-3 px-4 text-dark-400">Afficher la version de Git Agent</td>
@@ -199,6 +203,89 @@ export function renderUsage(): string {
             <p class="text-dark-400 text-sm">
               Cette approche maintient un historique Git propre et facilite les revues de code.
             </p>
+          </div>
+        </div>
+
+        <div class="mb-12">
+          <h2 class="text-2xl font-semibold text-white mb-6 flex items-center gap-2">
+            <svg class="w-6 h-6 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+            </svg>
+            Apprentissage du style (learn)
+          </h2>
+
+          <div class="card mb-4">
+            <h3 class="text-lg font-semibold text-white mb-3">Pourquoi utiliser learn ?</h3>
+            <p class="text-dark-400 mb-4">
+              La commande <code class="code-inline">git-agent learn</code> analyse l'historique des commits
+              de votre repository pour comprendre le style de votre équipe et générer des messages cohérents.
+            </p>
+            <ul class="space-y-2 text-dark-300">
+              <li class="flex items-start gap-2">
+                <span class="text-primary-400">→</span>
+                <span>Détecte la langue utilisée (français, anglais, mixte)</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="text-primary-400">→</span>
+                <span>Identifie le format (Conventional Commits, libre...)</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="text-primary-400">→</span>
+                <span>Apprend les scopes utilisés dans le projet</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="text-primary-400">→</span>
+                <span>Détecte l'utilisation d'emojis et les associe aux types</span>
+              </li>
+            </ul>
+          </div>
+
+          <div class="card mb-4">
+            <h3 class="text-lg font-semibold text-white mb-3">Utilisation</h3>
+            <div class="space-y-4">
+              <div>
+                <p class="text-dark-400 mb-2">Analyser les 100 derniers commits :</p>
+                <div class="code-wrapper relative">
+                  <pre class="code-block"><code>git-agent learn</code></pre>
+                </div>
+              </div>
+              <div>
+                <p class="text-dark-400 mb-2">Analyser plus de commits pour plus de précision :</p>
+                <div class="code-wrapper relative">
+                  <pre class="code-block"><code>git-agent learn --commits 500</code></pre>
+                </div>
+              </div>
+              <div>
+                <p class="text-dark-400 mb-2">Apprendre le style d'un contributeur spécifique :</p>
+                <div class="code-wrapper relative">
+                  <pre class="code-block"><code>git-agent learn --author "email@exemple.com"</code></pre>
+                </div>
+              </div>
+              <div>
+                <p class="text-dark-400 mb-2">Réinitialiser le style appris :</p>
+                <div class="code-wrapper relative">
+                  <pre class="code-block"><code>git-agent learn --reset</code></pre>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 class="text-lg font-semibold text-white mb-3">Résultat de l'analyse</h3>
+            <div class="bg-dark-900 rounded-xl p-4 font-mono text-sm">
+              <div class="text-cyan-400 mb-2">╔═══════════════════════════════════════════════════════╗</div>
+              <div class="text-yellow-400 mb-2">║            📊 STYLE DÉTECTÉ                           ║</div>
+              <div class="text-cyan-400 mb-2">╠═══════════════════════════════════════════════════════╣</div>
+              <div class="text-dark-300 mb-1">║  Langue           │  🇫🇷 Français                      ║</div>
+              <div class="text-dark-300 mb-1">║  Format           │  ✅ Conventional Commits          ║</div>
+              <div class="text-dark-300 mb-1">║  Emojis           │  ✨ Oui                            ║</div>
+              <div class="text-dark-300 mb-1">║  Longueur moyenne │  52 caractères                    ║</div>
+              <div class="text-cyan-400 mb-2">╠═══════════════════════════════════════════════════════╣</div>
+              <div class="text-yellow-400 mb-1">║            📁 SCOPES UTILISÉS                         ║</div>
+              <div class="text-dark-400 mb-2">║  api, ui, core, auth, cli                             ║</div>
+              <div class="text-cyan-400">╚═══════════════════════════════════════════════════════╝</div>
+              <div class="text-green-400 mt-3">✓ Profil sauvegardé: .git-agent/learned-style.json</div>
+            </div>
           </div>
         </div>
 

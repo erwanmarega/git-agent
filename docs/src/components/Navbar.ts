@@ -3,6 +3,7 @@ export function renderNavbar(currentSection: string): string {
     { id: "home", label: "Accueil" },
     { id: "installation", label: "Installation" },
     { id: "usage", label: "Utilisation" },
+    { id: "local", label: "Local Dev" },
     { id: "api", label: "API" },
     { id: "configuration", label: "Configuration" },
   ];

@@ -93,3 +93,17 @@
     text-wrap: balance;
   }
 }
+
+/* Main content wrapper with sidebar offset */
+.main-content {
+  @apply lg:ml-64 pt-14 min-h-screen;
+}
+
+/* Adjust sections for sidebar layout */
+.main-content section {
+  @apply pt-8;
+}
+
+.main-content section:first-child {
+  @apply pt-12;
+}

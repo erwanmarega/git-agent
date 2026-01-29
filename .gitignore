@@ -44,3 +44,6 @@ README-test.md
 
 # Git Agent
 .git-agent/
+
+# Claude Code
+.claude/
